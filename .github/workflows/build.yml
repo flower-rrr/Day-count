@@ -204,7 +204,7 @@ jobs:
                   CountdownView(android.content.Context ctx) {
                       super(ctx);
                       // 主文字：白色大字
-                      textPaint.setColor(Color.parseColor("FF9F0A"));
+                      textPaint.setColor(Color.parseColor("#FF9F0A"));
                       textPaint.setTextSize(144f);
                       textPaint.setTextAlign(Paint.Align.CENTER);
                       textPaint.setFakeBoldText(true);
