@@ -395,7 +395,6 @@ jobs:
                       android:textSize="28sp" android:textStyle="bold"
                       android:layout_marginBottom="32dp"/>
 
-                  <!-- 日期選擇器 -->
                   <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                       android:text="目標日期" android:textColor="#8E8E93" android:textSize="14sp"
                       android:layout_marginBottom="8dp"/>
@@ -419,7 +418,6 @@ jobs:
                           android:layout_weight="2"/>
                   </LinearLayout>
 
-                  <!-- 時間選擇器 -->
                   <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                       android:text="目標時間" android:textColor="#8E8E93" android:textSize="14sp"
                       android:layout_marginTop="20dp" android:layout_marginBottom="8dp"/>
@@ -443,7 +441,6 @@ jobs:
                           android:layout_weight="1"/>
                   </LinearLayout>
 
-                  <!-- 開關 -->
                   <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                       android:orientation="horizontal" android:gravity="center_vertical"
                       android:layout_marginTop="40dp"
@@ -481,17 +478,12 @@ jobs:
               <style name="Theme.Countdown" parent="Theme.AppCompat.NoActionBar">
                   <item name="android:windowBackground">#1C1C1E</item>
                   <item name="android:statusBarColor">#1C1C1E</item>
-                  <item name="android:numberPickerStyle">@style/NpStyle</item>
-              </style>
-              
-              <style name="NpStyle" parent="Widget.AppCompat.NumberPicker">
                   <item name="android:textColorPrimary">#FFFFFF</item>
+                  <item name="colorControlNormal">#FF9F0A</item>
               </style>
           </resources>
           EOF
 
-
-                  
           mkdir -p app/src/main/res/drawable
           cat > app/src/main/res/drawable/ic_launcher_background.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
