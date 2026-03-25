@@ -205,7 +205,7 @@ jobs:
                       super(ctx);
                       // 主文字：白色大字
                       textPaint.setColor(Color.WHITE);
-                      textPaint.setTextSize(72f);
+                      textPaint.setTextSize(144f);
                       textPaint.setTextAlign(Paint.Align.CENTER);
                       textPaint.setFakeBoldText(true);
                       textPaint.setLetterSpacing(0.05f);
@@ -213,7 +213,7 @@ jobs:
                       textPaint.setShadowLayer(8f, 0f, 4f, Color.parseColor("#AA000000"));
                       // 天數小字
                       subPaint.setColor(Color.parseColor("#CCCCCC"));
-                      subPaint.setTextSize(42f);
+                      subPaint.setTextSize(84f);
                       subPaint.setTextAlign(Paint.Align.CENTER);
                       subPaint.setFakeBoldText(false);
                       subPaint.setShadowLayer(6f, 0f, 3f, Color.parseColor("#AA000000"));
