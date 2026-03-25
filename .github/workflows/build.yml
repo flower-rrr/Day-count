@@ -483,12 +483,15 @@ jobs:
                   <item name="android:statusBarColor">#1C1C1E</item>
                   <item name="android:numberPickerStyle">@style/NpStyle</item>
               </style>
-              <style name="NpStyle" parent="android:Widget.NumberPicker">
+              
+              <style name="NpStyle" parent="Widget.AppCompat.NumberPicker">
                   <item name="android:textColorPrimary">#FFFFFF</item>
               </style>
           </resources>
           EOF
 
+
+                  
           mkdir -p app/src/main/res/drawable
           cat > app/src/main/res/drawable/ic_launcher_background.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
