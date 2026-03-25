@@ -204,7 +204,7 @@ jobs:
                   CountdownView(android.content.Context ctx) {
                       super(ctx);
                       // 主文字：白色大字
-                      textPaint.setColor(Color.WHITE);
+                      textPaint.setColor(Color.parseColor("FF9F0A"));
                       textPaint.setTextSize(144f);
                       textPaint.setTextAlign(Paint.Align.CENTER);
                       textPaint.setFakeBoldText(true);
@@ -222,7 +222,7 @@ jobs:
                   void setTarget(long ms) { targetMillis = ms; invalidate(); }
 
                   @Override protected void onMeasure(int w, int h) {
-                      setMeasuredDimension(MeasureSpec.getSize(w), 160);
+                      setMeasuredDimension(MeasureSpec.getSize(w), 320);
                   }
 
                   @Override protected void onDraw(Canvas canvas) {
@@ -242,10 +242,10 @@ jobs:
                       // 天數行
                       if (days > 0) {
                           String dayStr = days + " 天";
-                          canvas.drawText(dayStr, cx, 50f, subPaint);
+                          canvas.drawText(dayStr, cx, 100f, subPaint);
                           // 時分秒行
                           String timeStr = String.format("%02d:%02d:%02d.%02d", hours, minutes, seconds, centis);
-                          canvas.drawText(timeStr, cx, 130f, textPaint);
+                          canvas.drawText(timeStr, cx, 260f, textPaint);
                       } else {
                           // 只顯示時分秒（置中）
                           String timeStr = String.format("%02d:%02d:%02d.%02d", hours, minutes, seconds, centis);
