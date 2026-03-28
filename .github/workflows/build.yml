@@ -114,7 +114,6 @@ jobs:
           import android.content.Intent;
           import android.graphics.*;
           import android.os.*;
-          import android.util.DisplayMetrics;
           import android.view.*;
           import androidx.core.app.NotificationCompat;
 
@@ -131,7 +130,7 @@ jobs:
               private final Runnable ticker = new Runnable() {
                   @Override public void run() {
                       if (overlayView != null && viewAdded) overlayView.invalidate();
-                      handler.postDelayed(this, 50); // 每 50ms 更新（小數點兩位）
+                      handler.postDelayed(this, 50);
                   }
               };
 
@@ -142,15 +141,16 @@ jobs:
                   startForeground(1, buildNotification());
               }
 
-              public void startOverlay(long targetMs) {
+              public void startOverlay(long targetMs, boolean enableBg) {
                   this.targetMillis = targetMs;
                   if (!viewAdded) {
                       int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                           ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                           : WindowManager.LayoutParams.TYPE_PHONE;
+                      // 這裡高度改為 MATCH_PARENT 以填滿螢幕
                       WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                           WindowManager.LayoutParams.MATCH_PARENT,
-                          WindowManager.LayoutParams.WRAP_CONTENT,
+                          WindowManager.LayoutParams.MATCH_PARENT,
                           type,
                           WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                           | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -160,7 +160,7 @@ jobs:
                       wm.addView(overlayView, params);
                       viewAdded = true;
                   }
-                  overlayView.setTarget(targetMs);
+                  overlayView.setTarget(targetMs, enableBg);
                   handler.post(ticker);
               }
 
@@ -169,9 +169,9 @@ jobs:
                   if (viewAdded) { wm.removeView(overlayView); viewAdded = false; }
               }
 
-              public void updateTarget(long targetMs) {
+              public void updateTarget(long targetMs, boolean enableBg) {
                   this.targetMillis = targetMs;
-                  if (overlayView != null) overlayView.setTarget(targetMs);
+                  if (overlayView != null) overlayView.setTarget(targetMs, enableBg);
               }
 
               private Notification buildNotification() {
@@ -192,64 +192,91 @@ jobs:
               }
               @Override public IBinder onBind(Intent i) { return null; }
 
-              // ── Overlay View ──
               @SuppressLint("ViewConstructor")
               static class CountdownView extends View {
                   private long targetMillis = 0;
+                  private boolean enableBg = false;
                   private final Paint bgPaint = new Paint();
                   private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-                  private final Paint shadowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
                   private final Paint subPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
                   CountdownView(android.content.Context ctx) {
                       super(ctx);
-                      // 主文字：白色大字
+                      bgPaint.setStyle(Paint.Style.FILL);
+                      
                       textPaint.setColor(Color.parseColor("#FF9F0A"));
                       textPaint.setTextSize(144f);
                       textPaint.setTextAlign(Paint.Align.CENTER);
                       textPaint.setFakeBoldText(true);
-                      textPaint.setLetterSpacing(0.05f);
-                      // 陰影（加強可讀性）
-                      textPaint.setShadowLayer(8f, 0f, 4f, Color.parseColor("#AA000000"));
-                      // 天數小字
+                      textPaint.setShadowLayer(10f, 0f, 5f, Color.BLACK);
+
                       subPaint.setColor(Color.parseColor("#CCCCCC"));
                       subPaint.setTextSize(84f);
                       subPaint.setTextAlign(Paint.Align.CENTER);
-                      subPaint.setFakeBoldText(false);
-                      subPaint.setShadowLayer(6f, 0f, 3f, Color.parseColor("#AA000000"));
+                      subPaint.setShadowLayer(8f, 0f, 4f, Color.BLACK);
                   }
 
-                  void setTarget(long ms) { targetMillis = ms; invalidate(); }
+                  void setTarget(long ms, boolean bg) { 
+                      this.targetMillis = ms; 
+                      this.enableBg = bg;
+                      invalidate(); 
+                  }
 
                   @Override protected void onMeasure(int w, int h) {
-                      setMeasuredDimension(MeasureSpec.getSize(w), 320);
+                      // 由於外層是 MATCH_PARENT，這裡直接取分配到的全螢幕尺寸
+                      setMeasuredDimension(MeasureSpec.getSize(w), MeasureSpec.getSize(h));
                   }
 
                   @Override protected void onDraw(Canvas canvas) {
                       long now = System.currentTimeMillis();
                       long diff = targetMillis - now;
-                      if (diff < 0) diff = 0;
 
-                      long totalSec = diff / 1000;
+                      // 1. 處理背景邏輯
+                      if (enableBg) {
+                          double exactDays = Math.abs(diff) / 86400000.0;
+                          double opacityPercent = 0.0;
+                          
+                          if (exactDays > 0) {
+                              if (diff > 0) {
+                                  // 還沒到：100% / (1.1 * 剩餘天數)
+                                  opacityPercent = 100.0 / (1.1 * exactDays);
+                              } else {
+                                  // 超過後遞減：100% / 超過天數
+                                  opacityPercent = 100.0 / exactDays;
+                              }
+                          } else {
+                              // 剛好為 0 的極限值
+                              opacityPercent = 95.0; 
+                          }
+                          
+                          // 最高限制 95%
+                          if (opacityPercent > 95.0) opacityPercent = 95.0;
+                          
+                          int alpha = (int) Math.round((opacityPercent / 100.0) * 255.0);
+                          bgPaint.setColor(Color.RED);
+                          bgPaint.setAlpha(alpha);
+                          canvas.drawRect(0, 0, getWidth(), getHeight(), bgPaint);
+                      }
+
+                      // 2. 處理文字邏輯 (文字倒數卡在 0，不顯示負數)
+                      long displayDiff = diff < 0 ? 0 : diff;
+                      long totalSec = displayDiff / 1000;
                       long days    = totalSec / 86400;
                       long hours   = (totalSec % 86400) / 3600;
                       long minutes = (totalSec % 3600) / 60;
                       long seconds = totalSec % 60;
-                      long centis  = (diff % 1000) / 10; // 百分秒
+                      long centis  = (displayDiff % 1000) / 10;
 
                       float cx = getWidth() / 2f;
+                      float cy = getHeight() / 2f;
 
-                      // 天數行
                       if (days > 0) {
-                          String dayStr = days + " 天";
-                          canvas.drawText(dayStr, cx, 100f, subPaint);
-                          // 時分秒行
+                          canvas.drawText(days + " 天", cx, cy - 80f, subPaint);
                           String timeStr = String.format("%02d:%02d:%02d.%02d", hours, minutes, seconds, centis);
-                          canvas.drawText(timeStr, cx, 260f, textPaint);
+                          canvas.drawText(timeStr, cx, cy + 120f, textPaint);
                       } else {
-                          // 只顯示時分秒（置中）
                           String timeStr = String.format("%02d:%02d:%02d.%02d", hours, minutes, seconds, centis);
-                          canvas.drawText(timeStr, cx, 110f, textPaint);
+                          canvas.drawText(timeStr, cx, cy + 40f, textPaint);
                       }
                   }
               }
@@ -270,67 +297,45 @@ jobs:
           import java.util.Calendar;
 
           public class MainActivity extends AppCompatActivity {
-
               private NumberPicker npYear, npMonth, npDay, npHour, npMin, npSec;
-              private Switch swOverlay;
+              private Switch swOverlay, swBg;
               private TextView tvStatus;
               private static final int REQ_PERM = 1001;
 
               @Override protected void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
                   setContentView(R.layout.activity_main);
+                  npYear = findViewById(R.id.npYear); npMonth = findViewById(R.id.npMonth);
+                  npDay = findViewById(R.id.npDay); npHour = findViewById(R.id.npHour);
+                  npMin = findViewById(R.id.npMin); npSec = findViewById(R.id.npSec);
+                  swOverlay = findViewById(R.id.swOverlay); 
+                  swBg = findViewById(R.id.swBg);
+                  tvStatus = findViewById(R.id.tvStatus);
 
-                  npYear  = findViewById(R.id.npYear);
-                  npMonth = findViewById(R.id.npMonth);
-                  npDay   = findViewById(R.id.npDay);
-                  npHour  = findViewById(R.id.npHour);
-                  npMin   = findViewById(R.id.npMin);
-                  npSec   = findViewById(R.id.npSec);
-                  swOverlay = findViewById(R.id.swOverlay);
-                  tvStatus  = findViewById(R.id.tvStatus);
-
-                  // 設定範圍
                   Calendar now = Calendar.getInstance();
-                  npYear.setMinValue(now.get(Calendar.YEAR));
-                  npYear.setMaxValue(now.get(Calendar.YEAR) + 20);
+                  npYear.setMinValue(now.get(Calendar.YEAR)); npYear.setMaxValue(now.get(Calendar.YEAR) + 20);
                   npYear.setValue(now.get(Calendar.YEAR));
+                  npMonth.setMinValue(1); npMonth.setMaxValue(12); npMonth.setValue(now.get(Calendar.MONTH) + 1);
+                  npDay.setMinValue(1); npDay.setMaxValue(31); npDay.setValue(now.get(Calendar.DAY_OF_MONTH));
+                  npHour.setMinValue(0); npHour.setMaxValue(23); npHour.setValue(now.get(Calendar.HOUR_OF_DAY));
+                  npMin.setMinValue(0); npMin.setMaxValue(59); npMin.setValue(now.get(Calendar.MINUTE));
+                  npSec.setMinValue(0); npSec.setMaxValue(59); npSec.setValue(now.get(Calendar.SECOND));
 
-                  npMonth.setMinValue(1); npMonth.setMaxValue(12);
-                  npMonth.setValue(now.get(Calendar.MONTH) + 1);
-
-                  npDay.setMinValue(1); npDay.setMaxValue(31);
-                  npDay.setValue(now.get(Calendar.DAY_OF_MONTH));
-
-                  npHour.setMinValue(0); npHour.setMaxValue(23);
-                  npHour.setValue(now.get(Calendar.HOUR_OF_DAY));
-
-                  npMin.setMinValue(0); npMin.setMaxValue(59);
-                  npMin.setValue(now.get(Calendar.MINUTE));
-
-                  npSec.setMinValue(0); npSec.setMaxValue(59);
-                  npSec.setValue(now.get(Calendar.SECOND));
-
-                  // 開關初始鎖定
-                  swOverlay.setEnabled(false);
-                  swOverlay.setChecked(false);
-
-                  // 任何欄位改變時更新開關狀態
                   NumberPicker.OnValueChangeListener listener = (picker, oldVal, newVal) -> updateSwitchState();
-                  npYear.setOnValueChangedListener(listener);
-                  npMonth.setOnValueChangedListener(listener);
-                  npDay.setOnValueChangedListener(listener);
-                  npHour.setOnValueChangedListener(listener);
-                  npMin.setOnValueChangedListener(listener);
-                  npSec.setOnValueChangedListener(listener);
+                  npYear.setOnValueChangedListener(listener); npMonth.setOnValueChangedListener(listener);
+                  npDay.setOnValueChangedListener(listener); npHour.setOnValueChangedListener(listener);
+                  npMin.setOnValueChangedListener(listener); npSec.setOnValueChangedListener(listener);
+
+                  // 背景開關變更時也同步更新 Service
+                  swBg.setOnCheckedChangeListener((btn, checked) -> updateSwitchState());
 
                   swOverlay.setOnCheckedChangeListener((btn, checked) -> {
                       if (checked) {
                           if (!hasPerm()) { requestPerm(); swOverlay.setChecked(false); return; }
                           startService(new Intent(this, CountdownService.class));
-                          // 等 Service 啟動
                           new android.os.Handler().postDelayed(() -> {
                               CountdownService svc = CountdownService.getInstance();
-                              if (svc != null) svc.startOverlay(getTargetMillis());
+                              if (svc != null) svc.startOverlay(getTargetMillis(), swBg.isChecked());
                           }, 300);
                           tvStatus.setText("倒數顯示中");
                       } else {
@@ -344,39 +349,29 @@ jobs:
               private void updateSwitchState() {
                   long target = getTargetMillis();
                   boolean future = target > System.currentTimeMillis();
-                  swOverlay.setEnabled(future);
-                  if (!future && swOverlay.isChecked()) {
-                      swOverlay.setChecked(false);
-                      CountdownService svc = CountdownService.getInstance();
-                      if (svc != null) svc.stopOverlay();
+                  
+                  // 如果未開啟 Overlay，只允許設定未來時間才能開啟
+                  // 如果已經開啟，就不再強制關閉（讓過期後背景遞減的效果可以繼續運行）
+                  if (!swOverlay.isChecked()) {
+                      swOverlay.setEnabled(future);
+                  } else {
+                      swOverlay.setEnabled(true);
                   }
-                  // 如果已開啟，即時更新目標
+
                   if (swOverlay.isChecked()) {
                       CountdownService svc = CountdownService.getInstance();
-                      if (svc != null) svc.updateTarget(target);
+                      if (svc != null) svc.updateTarget(target, swBg.isChecked());
                   }
               }
 
               private long getTargetMillis() {
                   Calendar c = Calendar.getInstance();
-                  c.set(npYear.getValue(), npMonth.getValue()-1, npDay.getValue(),
-                        npHour.getValue(), npMin.getValue(), npSec.getValue());
+                  c.set(npYear.getValue(), npMonth.getValue()-1, npDay.getValue(), npHour.getValue(), npMin.getValue(), npSec.getValue());
                   c.set(Calendar.MILLISECOND, 0);
                   return c.getTimeInMillis();
               }
-
-              private boolean hasPerm() {
-                  return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this);
-              }
-              private void requestPerm() {
-                  startActivityForResult(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                      Uri.parse("package:" + getPackageName())), REQ_PERM);
-              }
-              @Override protected void onActivityResult(int req, int res, Intent data) {
-                  super.onActivityResult(req, res, data);
-                  if (req == REQ_PERM && !hasPerm())
-                      Toast.makeText(this, "需要「顯示在其他應用程式上方」的權限", Toast.LENGTH_LONG).show();
-              }
+              private boolean hasPerm() { return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this); }
+              private void requestPerm() { startActivityForResult(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())), REQ_PERM); }
           }
           JEOF
 
@@ -387,81 +382,35 @@ jobs:
               android:layout_width="match_parent" android:layout_height="match_parent"
               android:background="#1C1C1E">
               <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                  android:orientation="vertical" android:gravity="center_horizontal"
-                  android:padding="24dp">
-
+                  android:orientation="vertical" android:gravity="center_horizontal" android:padding="24dp">
                   <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                      android:text="⏳ 倒數計時" android:textColor="#FFFFFF"
-                      android:textSize="28sp" android:textStyle="bold"
-                      android:layout_marginBottom="32dp"/>
-
-                  <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                      android:text="目標日期" android:textColor="#8E8E93" android:textSize="14sp"
-                      android:layout_marginBottom="8dp"/>
-
-                  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                      android:orientation="horizontal" android:gravity="center">
-                      <NumberPicker android:id="@+id/npYear"
-                          android:layout_width="0dp" android:layout_height="wrap_content"
-                          android:layout_weight="3"/>
-                      <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                          android:text="/" android:textColor="#FFFFFF" android:textSize="20sp"
-                          android:paddingLeft="4dp" android:paddingRight="4dp"/>
-                      <NumberPicker android:id="@+id/npMonth"
-                          android:layout_width="0dp" android:layout_height="wrap_content"
-                          android:layout_weight="2"/>
-                      <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                          android:text="/" android:textColor="#FFFFFF" android:textSize="20sp"
-                          android:paddingLeft="4dp" android:paddingRight="4dp"/>
-                      <NumberPicker android:id="@+id/npDay"
-                          android:layout_width="0dp" android:layout_height="wrap_content"
-                          android:layout_weight="2"/>
+                      android:text="⏳ 倒數計時" android:textColor="#FFFFFF" android:textSize="28sp" android:textStyle="bold" android:layout_marginBottom="32dp"/>
+                  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center">
+                      <NumberPicker android:id="@+id/npYear" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="3"/>
+                      <NumberPicker android:id="@+id/npMonth" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="2"/>
+                      <NumberPicker android:id="@+id/npDay" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="2"/>
+                  </LinearLayout>
+                  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center" android:layout_marginTop="20dp">
+                      <NumberPicker android:id="@+id/npHour" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"/>
+                      <NumberPicker android:id="@+id/npMin" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"/>
+                      <NumberPicker android:id="@+id/npSec" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"/>
+                  </LinearLayout>
+                  
+                  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="40dp" android:background="#2C2C2E" android:padding="16dp">
+                      <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="顯示倒數 Overlay" android:textColor="#FFFFFF" android:textSize="17sp"/>
+                      <Switch android:id="@+id/swOverlay" android:layout_width="wrap_content" android:layout_height="wrap_content" android:thumbTint="#FF9F0A" android:trackTint="#3A3A3C"/>
+                  </LinearLayout>
+                  
+                  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="16dp" android:background="#2C2C2E" android:padding="16dp">
+                      <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="靠近目標時背景改變" android:textColor="#FFFFFF" android:textSize="17sp"/>
+                      <Switch android:id="@+id/swBg" android:layout_width="wrap_content" android:layout_height="wrap_content" android:thumbTint="#FF9F0A" android:trackTint="#3A3A3C"/>
                   </LinearLayout>
 
-                  <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                      android:text="目標時間" android:textColor="#8E8E93" android:textSize="14sp"
-                      android:layout_marginTop="20dp" android:layout_marginBottom="8dp"/>
-
-                  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                      android:orientation="horizontal" android:gravity="center">
-                      <NumberPicker android:id="@+id/npHour"
-                          android:layout_width="0dp" android:layout_height="wrap_content"
-                          android:layout_weight="1"/>
-                      <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                          android:text=":" android:textColor="#FFFFFF" android:textSize="24sp"
-                          android:paddingLeft="6dp" android:paddingRight="6dp"/>
-                      <NumberPicker android:id="@+id/npMin"
-                          android:layout_width="0dp" android:layout_height="wrap_content"
-                          android:layout_weight="1"/>
-                      <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                          android:text=":" android:textColor="#FFFFFF" android:textSize="24sp"
-                          android:paddingLeft="6dp" android:paddingRight="6dp"/>
-                      <NumberPicker android:id="@+id/npSec"
-                          android:layout_width="0dp" android:layout_height="wrap_content"
-                          android:layout_weight="1"/>
-                  </LinearLayout>
-
-                  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                      android:orientation="horizontal" android:gravity="center_vertical"
-                      android:layout_marginTop="40dp"
-                      android:background="#2C2C2E" android:padding="16dp">
-                      <TextView android:layout_width="0dp" android:layout_height="wrap_content"
-                          android:layout_weight="1" android:text="顯示倒數 Overlay"
-                          android:textColor="#FFFFFF" android:textSize="17sp"/>
-                      <Switch android:id="@+id/swOverlay"
-                          android:layout_width="wrap_content" android:layout_height="wrap_content"
-                          android:thumbTint="#FF9F0A" android:trackTint="#3A3A3C"/>
-                  </LinearLayout>
-
-                  <TextView android:id="@+id/tvStatus"
-                      android:layout_width="wrap_content" android:layout_height="wrap_content"
-                      android:text="" android:textColor="#8E8E93" android:textSize="14sp"
-                      android:layout_marginTop="16dp"/>
-
+                  <TextView android:id="@+id/tvStatus" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="" android:textColor="#8E8E93" android:textSize="14sp" android:layout_marginTop="16dp"/>
+                  
                   <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                       android:text="設定未來時間後才可開啟" android:textColor="#48484A"
                       android:textSize="13sp" android:layout_marginTop="8dp"/>
-
               </LinearLayout>
           </ScrollView>
           EOF
@@ -487,32 +436,22 @@ jobs:
           mkdir -p app/src/main/res/drawable
           cat > app/src/main/res/drawable/ic_launcher_background.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <shape xmlns:android="http://schemas.android.com/apk/res/android">
-              <solid android:color="#1C1C1E"/>
-          </shape>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"><solid android:color="#1C1C1E"/></shape>
           EOF
-
           mkdir -p app/src/main/res/mipmap-anydpi-v26
           for name in ic_launcher ic_launcher_round; do
             cat > app/src/main/res/mipmap-anydpi-v26/$name.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-              <background android:drawable="@drawable/ic_launcher_background"/>
-              <foreground android:drawable="@drawable/ic_launcher_background"/>
-          </adaptive-icon>
+          <?xml version="1.0" encoding="utf-8"?><adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android"><background android:drawable="@drawable/ic_launcher_background"/><foreground android:drawable="@drawable/ic_launcher_background"/></adaptive-icon>
           EOF
           done
-          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
-            mkdir -p app/src/main/res/mipmap-$density
-            for name in ic_launcher ic_launcher_round; do
-              echo '<?xml version="1.0" encoding="utf-8"?><bitmap xmlns:android="http://schemas.android.com/apk/res/android" android:src="@drawable/ic_launcher_background"/>' \
-                > app/src/main/res/mipmap-$density/$name.xml
+          for d in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            mkdir -p app/src/main/res/mipmap-$d
+            for n in ic_launcher ic_launcher_round; do
+              echo '<?xml version="1.0" encoding="utf-8"?><bitmap xmlns:android="http://schemas.android.com/apk/res/android" android:src="@drawable/ic_launcher_background"/>' > app/src/main/res/mipmap-$d/$n.xml
             done
           done
-
           mkdir -p gradle/wrapper
-          curl -sL "https://github.com/gradle/gradle/raw/v8.2.0/gradle/wrapper/gradle-wrapper.jar" \
-            -o gradle/wrapper/gradle-wrapper.jar
+          curl -sL "https://github.com/gradle/gradle/raw/v8.2.0/gradle/wrapper/gradle-wrapper.jar" -o gradle/wrapper/gradle-wrapper.jar
           cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
@@ -522,7 +461,6 @@ jobs:
           EOF
           curl -sL "https://raw.githubusercontent.com/gradle/gradle/v8.2.0/gradlew" -o gradlew
           chmod +x gradlew
-          echo "All files generated"
 
       - name: Restore keystore
         run: |
