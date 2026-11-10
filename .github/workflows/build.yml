@@ -123,9 +123,15 @@ jobs:
               private CountdownView overlayView;
               private boolean viewAdded = false;
               private long targetMillis = 0;
+              private boolean enableBg = false;
               private final Handler handler = new Handler(Looper.getMainLooper());
 
               public static CountdownService getInstance() { return instance; }
+
+              // 供 MainActivity 開啟時同步目前狀態
+              public boolean isOverlayShowing() { return viewAdded; }
+              public long getTargetMillis() { return targetMillis; }
+              public boolean isBgEnabled() { return enableBg; }
 
               private final Runnable ticker = new Runnable() {
                   @Override public void run() {
@@ -143,11 +149,11 @@ jobs:
 
               public void startOverlay(long targetMs, boolean enableBg) {
                   this.targetMillis = targetMs;
+                  this.enableBg = enableBg;
                   if (!viewAdded) {
                       int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                           ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                           : WindowManager.LayoutParams.TYPE_PHONE;
-                      // 這裡高度改為 MATCH_PARENT 以填滿螢幕
                       WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                           WindowManager.LayoutParams.MATCH_PARENT,
                           WindowManager.LayoutParams.MATCH_PARENT,
@@ -171,6 +177,7 @@ jobs:
 
               public void updateTarget(long targetMs, boolean enableBg) {
                   this.targetMillis = targetMs;
+                  this.enableBg = enableBg;
                   if (overlayView != null) overlayView.setTarget(targetMs, enableBg);
               }
 
@@ -203,7 +210,7 @@ jobs:
                   CountdownView(android.content.Context ctx) {
                       super(ctx);
                       bgPaint.setStyle(Paint.Style.FILL);
-                      
+
                       textPaint.setColor(Color.parseColor("#FF9F0A"));
                       textPaint.setTextSize(144f);
                       textPaint.setTextAlign(Paint.Align.CENTER);
@@ -216,14 +223,13 @@ jobs:
                       subPaint.setShadowLayer(8f, 0f, 4f, Color.BLACK);
                   }
 
-                  void setTarget(long ms, boolean bg) { 
-                      this.targetMillis = ms; 
+                  void setTarget(long ms, boolean bg) {
+                      this.targetMillis = ms;
                       this.enableBg = bg;
-                      invalidate(); 
+                      invalidate();
                   }
 
                   @Override protected void onMeasure(int w, int h) {
-                      // 由於外層是 MATCH_PARENT，這裡直接取分配到的全螢幕尺寸
                       setMeasuredDimension(MeasureSpec.getSize(w), MeasureSpec.getSize(h));
                   }
 
@@ -235,7 +241,7 @@ jobs:
                       if (enableBg) {
                           double exactDays = Math.abs(diff) / 86400000.0;
                           double opacityPercent = 0.0;
-                          
+
                           if (exactDays > 0) {
                               if (diff > 0) {
                                   // 還沒到：100% / (1.1 * 剩餘天數)
@@ -245,20 +251,27 @@ jobs:
                                   opacityPercent = 100.0 / exactDays;
                               }
                           } else {
-                              // 剛好為 0 的極限值
-                              opacityPercent = 95.0; 
+                              opacityPercent = 95.0;
                           }
-                          
-                          // 最高限制 95%
+
                           if (opacityPercent > 95.0) opacityPercent = 95.0;
-                          
+
                           int alpha = (int) Math.round((opacityPercent / 100.0) * 255.0);
                           bgPaint.setColor(Color.RED);
                           bgPaint.setAlpha(alpha);
                           canvas.drawRect(0, 0, getWidth(), getHeight(), bgPaint);
                       }
 
-                      // 2. 處理文字邏輯 (文字倒數卡在 0，不顯示負數)
+                      // 2. 文字透明度係數：剩餘 <= 365 天 = 1；超過則 365/剩餘天數（越多越透明，永不為 0）
+                      double remDays = diff > 0 ? diff / 86400000.0 : 0.0;
+                      double factor = remDays > 365.0 ? 365.0 / remDays : 1.0;
+                      int ta = (int) Math.max(1, Math.min(255, Math.round(255.0 * factor)));
+                      textPaint.setAlpha(ta);
+                      subPaint.setAlpha(ta);
+                      textPaint.setShadowLayer(10f, 0f, 5f, Color.argb(ta, 0, 0, 0));
+                      subPaint.setShadowLayer(8f, 0f, 4f, Color.argb(ta, 0, 0, 0));
+
+                      // 3. 處理文字邏輯 (文字倒數卡在 0，不顯示負數)
                       long displayDiff = diff < 0 ? 0 : diff;
                       long totalSec = displayDiff / 1000;
                       long days    = totalSec / 86400;
@@ -300,6 +313,7 @@ jobs:
               private NumberPicker npYear, npMonth, npDay, npHour, npMin, npSec;
               private Switch swOverlay, swBg;
               private TextView tvStatus;
+              private boolean syncing = false;
               private static final int REQ_PERM = 1001;
 
               @Override protected void onCreate(Bundle savedInstanceState) {
@@ -308,7 +322,7 @@ jobs:
                   npYear = findViewById(R.id.npYear); npMonth = findViewById(R.id.npMonth);
                   npDay = findViewById(R.id.npDay); npHour = findViewById(R.id.npHour);
                   npMin = findViewById(R.id.npMin); npSec = findViewById(R.id.npSec);
-                  swOverlay = findViewById(R.id.swOverlay); 
+                  swOverlay = findViewById(R.id.swOverlay);
                   swBg = findViewById(R.id.swBg);
                   tvStatus = findViewById(R.id.tvStatus);
 
@@ -321,15 +335,20 @@ jobs:
                   npMin.setMinValue(0); npMin.setMaxValue(59); npMin.setValue(now.get(Calendar.MINUTE));
                   npSec.setMinValue(0); npSec.setMaxValue(59); npSec.setValue(now.get(Calendar.SECOND));
 
-                  NumberPicker.OnValueChangeListener listener = (picker, oldVal, newVal) -> updateSwitchState();
+                  NumberPicker.OnValueChangeListener listener = (picker, oldVal, newVal) -> {
+                      if (!syncing) updateSwitchState();
+                  };
                   npYear.setOnValueChangedListener(listener); npMonth.setOnValueChangedListener(listener);
                   npDay.setOnValueChangedListener(listener); npHour.setOnValueChangedListener(listener);
                   npMin.setOnValueChangedListener(listener); npSec.setOnValueChangedListener(listener);
 
                   // 背景開關變更時也同步更新 Service
-                  swBg.setOnCheckedChangeListener((btn, checked) -> updateSwitchState());
+                  swBg.setOnCheckedChangeListener((btn, checked) -> {
+                      if (!syncing) updateSwitchState();
+                  });
 
                   swOverlay.setOnCheckedChangeListener((btn, checked) -> {
+                      if (syncing) return;
                       if (checked) {
                           if (!hasPerm()) { requestPerm(); swOverlay.setChecked(false); return; }
                           startService(new Intent(this, CountdownService.class));
@@ -344,12 +363,46 @@ jobs:
                           tvStatus.setText("已關閉");
                       }
                   });
+
+                  syncFromService();
+              }
+
+              @Override protected void onResume() {
+                  super.onResume();
+                  syncFromService();
+              }
+
+              // 若計時器正在背景運行，開啟 App 時顯示當前目標時間與開關狀態
+              private void syncFromService() {
+                  CountdownService svc = CountdownService.getInstance();
+                  if (svc == null || !svc.isOverlayShowing()) return;
+                  syncing = true;
+                  try {
+                      Calendar c = Calendar.getInstance();
+                      c.setTimeInMillis(svc.getTargetMillis());
+                      int y = c.get(Calendar.YEAR);
+                      int nowY = Calendar.getInstance().get(Calendar.YEAR);
+                      npYear.setMinValue(Math.min(nowY, y));
+                      npYear.setMaxValue(Math.max(nowY + 20, y));
+                      npYear.setValue(y);
+                      npMonth.setValue(c.get(Calendar.MONTH) + 1);
+                      npDay.setValue(c.get(Calendar.DAY_OF_MONTH));
+                      npHour.setValue(c.get(Calendar.HOUR_OF_DAY));
+                      npMin.setValue(c.get(Calendar.MINUTE));
+                      npSec.setValue(c.get(Calendar.SECOND));
+                      swBg.setChecked(svc.isBgEnabled());
+                      swOverlay.setEnabled(true);
+                      swOverlay.setChecked(true);
+                      tvStatus.setText("倒數顯示中");
+                  } finally {
+                      syncing = false;
+                  }
               }
 
               private void updateSwitchState() {
                   long target = getTargetMillis();
                   boolean future = target > System.currentTimeMillis();
-                  
+
                   // 如果未開啟 Overlay，只允許設定未來時間才能開啟
                   // 如果已經開啟，就不再強制關閉（讓過期後背景遞減的效果可以繼續運行）
                   if (!swOverlay.isChecked()) {
@@ -395,19 +448,19 @@ jobs:
                       <NumberPicker android:id="@+id/npMin" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"/>
                       <NumberPicker android:id="@+id/npSec" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"/>
                   </LinearLayout>
-                  
+
                   <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="40dp" android:background="#2C2C2E" android:padding="16dp">
                       <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="顯示倒數 Overlay" android:textColor="#FFFFFF" android:textSize="17sp"/>
                       <Switch android:id="@+id/swOverlay" android:layout_width="wrap_content" android:layout_height="wrap_content" android:thumbTint="#FF9F0A" android:trackTint="#3A3A3C"/>
                   </LinearLayout>
-                  
+
                   <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="16dp" android:background="#2C2C2E" android:padding="16dp">
                       <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="靠近目標時背景改變" android:textColor="#FFFFFF" android:textSize="17sp"/>
                       <Switch android:id="@+id/swBg" android:layout_width="wrap_content" android:layout_height="wrap_content" android:thumbTint="#FF9F0A" android:trackTint="#3A3A3C"/>
                   </LinearLayout>
 
                   <TextView android:id="@+id/tvStatus" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="" android:textColor="#8E8E93" android:textSize="14sp" android:layout_marginTop="16dp"/>
-                  
+
                   <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                       android:text="設定未來時間後才可開啟" android:textColor="#48484A"
                       android:textSize="13sp" android:layout_marginTop="8dp"/>
